@@ -46,8 +46,8 @@ $m->comp(
     extension => 'png',
     globalImage  => 1,
     class    => 'edit',
-    js       => qq{onclick="openWindow('/workflow/profile/} . $container->get_object_type . qq{/container/edit_related_$type.html?id=} . $container->get_id . qq{', 'RelatedBricolagePopup', { closeOnUnload: true, width: 780 }); return false"},
-    useTable => 0
+    js       => 'onclick="Container.find_related(' . $container->get_id . q{, '} . $container->get_object_type . qq{', '$type'); return false;"},
+    useTable => 0,
 );
 $m->print('</div>');
 
@@ -70,6 +70,12 @@ if ($rel) {
         }
     }
     # The summary info
+    $m->comp(
+        '.short_summary',
+        doc => $rel,
+        cid => $container_id,
+        type => $type,
+    );
     $m->print(qq{<div id="container_$container_id\_rel_$type\_summary">\n});
     $m->comp('/widgets/summary/summary.mc',
               asset  => $rel,
@@ -79,6 +85,7 @@ if ($rel) {
     );
     $m->print("</div>\n");
 } else {
+    $m->print(qq{<div id="container_$container_id\_rel_$type\_shortsum">&nbsp;</div>\n});
     $m->print(qq{<div id="container_$container_id\_rel_$type\_summary">&nbsp;</div>\n});
     $m->out('<div class="noneFound">',
         $lang->maketext('No related [_1]', ucfirst($type)),
@@ -88,3 +95,14 @@ if ($rel) {
 </%perl>
   </fieldset>
 </div>
+<%def .short_summary>
+<%args>
+$cid
+$type
+$doc
+</%args>
+<div id="container_<% $cid %>_rel_<% $type %>_shortsum" style="display:none;">
+<p class="hint"><strong><% $lang->maketext('Title') %>:</strong> <% $doc->get_title %><br />
+<strong><% $lang->maketext('Media Type') %>:</strong> <% $doc->get_element_name %></p>
+</div>
+</%def>

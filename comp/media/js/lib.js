@@ -1641,7 +1641,7 @@ var Container = {
             '/widgets/container_prof/_related.html', {
                 parameters: 'type=' + type + '&widget=' + widget +
                     '&container_id=' + container_id + '&container_prof|' +
-                     action + '_' + type + '_cb=' + asset_id,
+                     action + '_' + type + '_cb=' + asset_id + '&displayed=1',
                 asynchronous: !sync,
                 onSuccess: function(r) { window.close(); },
                 onFailure: Bricolage.handleError,
@@ -1670,7 +1670,7 @@ var Container = {
            },
            '/widgets/container_prof/_related.html', {
                parameters: 'type=' + type + '&widget=' + widget +
-                   '&container_id=' + container_id,
+                   '&container_id=' + container_id + '&displayed=1',
                asynchronous: !sync,
                onSuccess: function(r) { window.close(); },
                onFailure: Bricolage.handleError,
@@ -1750,6 +1750,11 @@ var Container = {
         if (hint_element) {
             Effect.toggle(hint_element, 'blind', {duration: 0.3});
         }
+        Effect.toggle(
+            'element_' + eid + '_hr',
+            'blind',
+            {duration: 0.3}
+        );
         return false;
     },
 
@@ -1757,7 +1762,6 @@ var Container = {
         var displayed = $('container_' + eid + '_' + type + '_displayed');
         var thumb = $('container_' + eid + '_rel_thumb');
         var data  = $('container_' + eid + '_rel_' + type + '_data');
-        var afterFinish;
         var thumbClass;
         var dataClass;
         if ( displayed.value == '0' ) {
@@ -1777,12 +1781,30 @@ var Container = {
         if (data != null) data.className = dataClass;
 
         Effect.toggle(
+            'container_' + eid + '_rel_' + type + '_shortsum',
+            'blind',
+            {duration: 0.3}
+        );
+        Effect.toggle(
             'container_' + eid + '_rel_' + type + '_summary',
             'blind',
-            {duration: 0.3, afterFinish: afterFinish}
+            {duration: 0.3}
         );
         return false;
-    }
+    },
+
+    find_related: function ( eid, type, rel_type ) {
+        openWindow(
+            '/workflow/profile/' + type + '/container/edit_related_' + rel_type + '.html?id=' + eid,
+            'RelatedBricolagePopup',
+            { closeOnUnload: true, width: 780 }
+        );
+        var displayed = $('container_' + eid + '_' + rel_type + '_displayed');
+        if (displayed.value == '0') {
+            this.toggle_related(rel_type, eid, $(rel_type + '_' + eid + '_showhide'));
+        }
+        return false;
+    },
 };
 
 Event.observe(window, 'load', function() {
