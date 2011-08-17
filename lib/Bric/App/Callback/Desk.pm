@@ -69,6 +69,7 @@ sub checkin : Callback {
         return;
     }
 
+    my $checked_out_to = $obj->get_user_id;
     $desk->checkin($obj);
     log_event("${class}_checkin", $obj, { Version => $obj->get_version });
 
@@ -78,7 +79,7 @@ sub checkin : Callback {
         $obj->save;
         log_event("${class}_rem_workflow", $obj);
     } elsif ($next_desk_id eq 'publish') {
-        $self->_move_to_publish_desk($obj);
+        $self->_move_to_publish_desk($obj, $checked_out_to);
         $self->params->{"${class}_pub"} = { $obj->get_version_id => $obj };
         $self->publish;
     } elsif ($next_desk_id eq 'deploy') {
@@ -86,6 +87,7 @@ sub checkin : Callback {
             $self->_move_to_publish_desk($obj);
             $self->params->{"desk_asset|template_pub_ids"} = [ $obj->get_version_id ];
             $self->deploy;
+            $self->_log_desk_move;
         }
     } elsif ($next_desk_id) {
         if ($desk->get_id != $next_desk_id) {
@@ -180,6 +182,7 @@ sub move : Callback {
             $self->_move_to_publish_desk($obj);
             $self->params->{"desk_asset|template_pub_ids"} = [ $obj->get_version_id ];
             $self->deploy;
+            $self->_log_desk_move;
         }
         return;
     }
@@ -211,10 +214,16 @@ sub move : Callback {
 }
 
 sub publish : Callback {
+    my ($self, $allow_fatal) = @_;
     my $self = shift;
     my $param = $self->params;
     my $story_pub = $param->{story_pub} || {};
     my $media_pub = $param->{media_pub} || {};
+    my $is_ajax   = do {
+        my $r = $self->apache_req;
+        $r && ($r->headers_in->{'X-Requested-With'} || '') eq 'XMLHttpRequest';
+    };
+    $allow_fatal ||= !$is_ajax;
 
     # If we were passed a string instead of an object, find the object
     for my $pub (\$story_pub, \$media_pub) {
@@ -368,16 +377,30 @@ sub publish : Callback {
     if (PUBLISH_RELATED_ASSETS && @messages) {
         $self->add_message(@$_) for @messages;
         if (PUBLISH_RELATED_FAIL_BEHAVIOR eq 'fail') {
-            $self->raise_conflict(
-                ['Publish aborted due to errors above. Please fix the above problems and try again.']);
+            # If it was on a desk, we need to revert its workflow status.
+            $self->_revert_to_original_state;
+            my $err = 'Publish aborted due to errors above. Please fix the '
+                    . 'above problems and try again.';
+            # Throw an error or a conflict as appropriate.
+            throw_error(
+                error    => $err,
+                maketext => [$err]
+            ) if $allow_fatal;
+            $self->raise_conflict([$err]);
         } else {
             # we are set to warn, should we add a further warning to the msg ?
             $self->show_accepted(
                 ['Some of the related assets were not published.']
             );
         }
-    } else {
-        $self->raise_conflict(@$_) for @messages;
+    } elsif (@messages) {
+        # If it was on a desk, we need to revert its workflow status.
+        $self->_revert_to_original_state;
+
+        # Add all messages and raise a conflict.
+        my $last = pop @messages;
+        $self->add_message(@$_) for @messages;
+        $self->raise_conflict(@$last);
     }
 
     # For publishing from a desk, I added two new 'publish'
@@ -399,18 +422,32 @@ sub publish : Callback {
             cb_request   => $self->cb_request,
             pkg_key      => 'publish',
             apache_req   => $self->apache_req,
-            params       => { instant => 1,
-                              pub_date => strfdate(),
-                          },
+            params       => {
+                instant  => 1,
+                pub_date => strfdate(),
+            },
         );
-        $pub->publish();
+        eval { $pub->publish };
+        if (my $err = $@) {
+            # If it was on a desk, we need to revert its workflow status.
+            $self->_revert_to_original_state;
+            # Continue with normal error handling.
+            die $err if $allow_fatal;
+            $self->raise_conflict($err->maketext);
+        } else {
+            # Success! Need to log the move to a desk. Yes, this is late, but
+            # better than the alternative, which is leaving the log message
+            # there in the case of publish failure.
+            $self->_log_desk_move;
+        }
     } else {
+        # Just leave it to the queue.
+        $self->_log_desk_move;
         $self->set_redirect('/workflow/profile/publish');
     }
 
     # Don't render anything for Ajax requests.
-    my $r = $self->apache_req or return;
-    $self->abort if ($r->headers_in->{'X-Requested-With'} || '') eq 'XMLHttpRequest';
+    $self->abort if $is_ajax;
 }
 
 sub deploy : Callback {
@@ -648,10 +685,14 @@ sub _merge_properties {
 }
 
 sub _move_to_publish_desk {
-    my ($self, $obj) = @_;
+    my ($self, $obj, $user_id) = @_;
 
     my $class = $obj->key_name;
-    my $cur_desk = $obj->get_current_desk;
+    my $cur_desk = $self->{pub_from_desk} = $obj->get_current_desk;
+    $self->{pub_from_work_id} = $obj->get_workflow_id;
+    $self->{pub_obj} = $obj;
+    $self->{pub_by_user_id} = $user_id;
+    print STDERR "Pub by $user_id\n";
 
     # Publish the template and remove it from workflow.
     my ($pub_desk, $no_log);
@@ -675,7 +716,28 @@ sub _move_to_publish_desk {
 
     $obj->save;
 
-    log_event("${class}_moved", $obj, { Desk => $pub_desk->get_name }) unless $no_log;
+    $self->{log_desk_move} = sub {
+        log_event("${class}_moved", $obj, { Desk => $pub_desk->get_name })
+    } unless $no_log;
+}
+
+sub _revert_to_original_state {
+    my $self = shift;
+    my $obj = delete $self->{pub_obj} or return;
+    my $work_id = delete $self->{pub_from_work_id} or return;
+    $obj->checkout({ user__id => delete $self->{pub_by_user_id} })
+        if defined $self->{pub_by_user_id};
+    $obj->set_workflow_id($work_id);
+    my $desk = delete $self->{pub_from_desk};
+    $desk->accept({ asset => $obj });
+    $desk->save;
+    $obj->save;
+}
+
+sub _log_desk_move {
+    my $self = shift;
+    my $code = delete $self->{log_desk_move} or return;
+    $code->();
 }
 
 1;
