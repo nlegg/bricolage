@@ -1311,7 +1311,7 @@ sub publish {
             next;
         }
 
-        if ($exp_date && $exp_date lt $publish_date) {
+        if ($exp_date && ($exp_date lt $publish_date || !$ba->is_active())) {
             # Don't really publish it, just expire it.
             return 1 unless $ba->get_publish_status;
             (my $search_path = $base_path) =~ s/([_%])/\\$1/g;
