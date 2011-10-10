@@ -87,6 +87,21 @@ sub preview : Callback {
         };
         if ($url) {
             status_msg("Redirecting to preview.");
+
+            # Intercept and modify redirects for MyDenison site
+            my $oc = $oc_id ? Bric::Biz::OutputChannel->lookup({ id => $oc_id }) : $media->get_primary_oc;
+            my ($dest) = Bric::Dist::ServerType->list({can_preview => 1, active => 1, output_channel_id => $oc->get_id,});
+            if ($media->get_site() && $media->get_site()->get_name() eq "MyDenison" && ($dest->get_servers())[0]->get_doc_root() =~ m/channels-apache/gi) {
+                my $category = $media->get_primary_category();
+                while($category->get_parent() && $category->get_parent()->get_uri() ne "/") {
+                    $category = $category->get_parent();
+                }
+                my $category_uri = $category->get_uri();
+                $category_uri =~ s/\///gi;
+                my $preview_uri = $oc->get_protocol() . ($dest->get_servers())[0]->get_host_name() . "/servlet/ProxyServlet/localhost" . $media->get_uri();
+                $url = "https://my.denison.edu/cas/login?service=" . $oc->get_protocol() . ($dest->get_servers())[0]->get_host_name() . "/Login?uP_fname%3Dfreestyle-preview%26preview%3D" . $preview_uri;
+            }
+
             # redirect_onload() prevents any other callbacks from executing.
             redirect_onload($url, $self);
         }
@@ -116,6 +131,20 @@ sub preview : Callback {
         # Move out the story and then redirect to preview.
         if (my $url = $b->preview($s, 'story', get_user_id(), $oc_id)) {
             status_msg("Redirecting to preview.");
+
+            # Intercept and modify redirects for MyDenison site
+            my $oc = $oc_id ? Bric::Biz::OutputChannel->lookup({ id => $oc_id }) : $s->get_primary_oc;
+            my ($dest) = Bric::Dist::ServerType->list({can_preview => 1, active => 1, output_channel_id => $oc->get_id,});
+            if ($s->get_site() && $s->get_site()->get_name() eq "MyDenison" && ($dest->get_servers())[0]->get_doc_root() =~ m/channels-apache/gi) {
+                my $category = $s->get_primary_category();
+                while($category->get_parent() && $category->get_parent()->get_uri() ne "/") {
+                    $category = $category->get_parent();
+                }
+                my $category_uri = $category->get_uri();
+                $category_uri =~ s/\///gi;
+                $url = "https://my.denison.edu/cas/login?service=" . $oc->get_protocol() . ($dest->get_servers())[0]->get_host_name() . "/Login?uP_fname%3D" . $category_uri . "%26cw_xml%3Dhttp://localhost" . $s->get_uri();
+            }
+
             # redirect_onload() prevents any other callbacks from executing.
             redirect_onload($url, $self);
         }
