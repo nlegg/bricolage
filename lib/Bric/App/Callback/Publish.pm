@@ -19,6 +19,7 @@ use Bric::Util::Trans::FS;
 use Bric::App::Event qw(log_event);
 use Bric::App::Util qw(:pkg);
 use Bric::Util::Fault qw(throw_error);
+use URI::Escape;
 
 sub preview : Callback {
     my $self = shift;
@@ -98,7 +99,7 @@ sub preview : Callback {
                 }
                 my $category_uri = $category->get_uri();
                 $category_uri =~ s/\///gi;
-                my $preview_uri = $oc->get_protocol() . ($dest->get_servers())[0]->get_host_name() . "/servlet/ProxyServlet/localhost" . $media->get_uri();
+                my $preview_uri = $oc->get_protocol() . ($dest->get_servers())[0]->get_host_name() . "/servlet/ProxyServlet/localhost" . uri_escape($media->get_uri());
                 $url = "https://my.denison.edu/cas/login?service=" . $oc->get_protocol() . ($dest->get_servers())[0]->get_host_name() . "/Login?uP_fname%3Dfreestyle-preview%26preview%3D" . $preview_uri;
             }
 
